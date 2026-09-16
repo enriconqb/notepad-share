@@ -1,7 +1,8 @@
 Options -Indexes
 RewriteEngine On
-# Laragon subfolder. Jika DocumentRoot = public/, ganti menjadi: RewriteBase /
-RewriteBase /notepad-share/public/
+# Laragon auto vhost notepad-share.test → DocumentRoot = public/  → pakai /
+# Jika diakses sebagai http://localhost/notepad-share/public/ → ganti: RewriteBase /notepad-share/public/
+RewriteBase /
 
 RewriteCond %{REQUEST_FILENAME} -f [OR]
 RewriteCond %{REQUEST_FILENAME} -d
