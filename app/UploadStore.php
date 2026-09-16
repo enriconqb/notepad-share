@@ -98,10 +98,14 @@ final class UploadStore
 
     private function detectMime(string $path): string
     {
-        if (class_exists(\finfo::class, false)) {
-            $mime = (new \finfo(FILEINFO_MIME_TYPE))->file($path) ?: '';
-            if (isset(self::MIME[$mime])) {
-                return $mime;
+        if (extension_loaded('fileinfo')) {
+            try {
+                $mime = (new \finfo(FILEINFO_MIME_TYPE))->file($path) ?: '';
+                if (isset(self::MIME[$mime])) {
+                    return $mime;
+                }
+            } catch (\Throwable) {
+                // Fallback if fileinfo is listed but the class is unavailable.
             }
         }
         if (function_exists('getimagesize')) {
