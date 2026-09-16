@@ -6,7 +6,7 @@ Aplikasi PHP 8.2 native (tanpa Laravel/MySQL). Konten disimpan sebagai JSON di f
 
 - PHP **8.2** (ekstensi: `json`, `session`, `fileinfo`, `dom`, `mbstring`)
 - Composer
-- Apache + `mod_rewrite` (Laragon), **atau** PHP built-in server untuk development
+- Apache + `mod_rewrite` (Laragon), **nginx** (lihat [NGINX.md](NGINX.md)), **atau** PHP built-in server untuk development
 - Folder `data/` dapat ditulis oleh PHP
 
 ## 1. Install dependensi
@@ -22,6 +22,7 @@ Pastikan folder ini ada dan writable:
 - `data/notes/`
 - `data/history/`
 - `data/uploads/`
+- `data/yjs/`
 
 ## 2. Pilih cara run
 
@@ -59,6 +60,14 @@ Catatan: server ini **satu thread**. SSE dipersingkat; sinkron antar tab memakai
 
 Hentikan server: `Ctrl+C` di terminal tersebut.
 
+### C. nginx (produksi)
+
+`.htaccess` **tidak dipakai**. `root` wajib `.../public` plus `try_files` ke `index.php`.
+
+Untuk **aaPanel** domain `note.ergiyonest.my.id`: website root Anda adalah folder proyek (`app`, `public`, `vendor`). Set **Running directory** = `/public`. Detail: [NGINX.md](NGINX.md) bagian 7.
+
+`composer install` saja tanpa vhost nginx yang benar hampir selalu **403 Forbidden**.
+
 ## 3. Pakai aplikasi
 
 1. Isi slug (contoh: `rapat-tim`) lalu **Buka / buat ruang**.
@@ -91,6 +100,7 @@ Bisa dijadwalkan (Task Scheduler) tiap 15 menit.
 
 | Gejala | Perbaikan |
 | --- | --- |
+| 403 Forbidden (halaman nginx / Cloudflare) | Document root bukan `public/`, atau nginx tanpa `try_files`. Lihat [NGINX.md](NGINX.md) |
 | 500 Internal Server Error / redirect loop | `RewriteBase` salah. Untuk `notepad-share.test` harus `/` |
 | 404 semua URL kecuali file | `mod_rewrite` / `RewriteBase` tidak cocok path |
 | Preview kosong / request nunggu lama | Jangan pakai SSE panjang di `php -S`; restart server dengan `index.php` sebagai router |
