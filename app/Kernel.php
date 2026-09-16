@@ -11,6 +11,7 @@ use App\Router;
 use App\SessionService;
 use App\Slug;
 use App\UploadStore;
+use App\YjsStore;
 
 final class Kernel
 {
@@ -20,6 +21,7 @@ final class Kernel
         private HistoryStore $history,
         private UploadStore $uploads,
         private MarkdownRenderer $markdown,
+        private YjsStore $yjs,
         private string $basePath,
         private string $views,
         private string $publicDir,
@@ -38,6 +40,9 @@ final class Kernel
         $r->add('POST', '/api/notes', fn () => $this->createNote());
         $r->add('GET', '/api/notes/(?P<slug>[a-z0-9-]+)', fn (string $slug) => $this->getNote($slug));
         $r->add('PUT', '/api/notes/(?P<slug>[a-z0-9-]+)', fn (string $slug) => $this->putNote($slug));
+        $r->add('POST', '/api/notes/(?P<slug>[a-z0-9-]+)/persist', fn (string $slug) => $this->persistNote($slug));
+        $r->add('GET', '/api/notes/(?P<slug>[a-z0-9-]+)/sync', fn (string $slug) => $this->getSync($slug));
+        $r->add('POST', '/api/notes/(?P<slug>[a-z0-9-]+)/sync', fn (string $slug) => $this->postSync($slug));
         $r->add('GET', '/api/notes/(?P<slug>[a-z0-9-]+)/events', fn (string $slug) => $this->sse($slug));
         $r->add('POST', '/api/notes/(?P<slug>[a-z0-9-]+)/presence', fn (string $slug) => $this->presence($slug));
         $r->add('GET', '/api/notes/(?P<slug>[a-z0-9-]+)/history', fn (string $slug) => $this->listHistory($slug));
@@ -179,6 +184,63 @@ final class Kernel
         Http::json(['rev' => $result['rev'], 'updated_at' => $result['updated_at']]);
     }
 
+    private function persistNote(string $slug): void
+    {
+        Csrf::requireValid();
+        $slug = $this->requireSlug($slug);
+        $body = Http::body();
+        $content = (string) ($body['content'] ?? '');
+        if (strlen($content) > 1572864) {
+            Http::error('size', 'Konten terlalu besar', 413);
+        }
+        $result = $this->notes->save($slug, function (array $n) use ($body, $content) {
+            if (($n['content'] ?? '') !== $content) {
+                $n['content'] = $content;
+                $n['rev'] = (int) $n['rev'] + 1;
+                $n['updated_at'] = gmdate('c');
+                $n['updated_by'] = SessionService::displayName();
+            }
+            if (isset($body['format'])) {
+                $n['format'] = $body['format'] === 'txt' ? 'txt' : 'md';
+            }
+            if (isset($body['retention_ms'])) {
+                $n['retention_ms'] = (int) $body['retention_ms'];
+            }
+            if (isset($body['encrypted'])) {
+                $n['encrypted'] = (bool) $body['encrypted'];
+            }
+            return $n;
+        });
+        Http::json(['rev' => $result['rev'], 'updated_at' => $result['updated_at'] ?? gmdate('c')]);
+    }
+
+    private function getSync(string $slug): void
+    {
+        $slug = $this->requireSlug($slug);
+        $this->notes->ensure($slug);
+        $since = (int) ($_GET['since'] ?? 0);
+        Http::json($this->yjs->since($slug, $since));
+    }
+
+    private function postSync(string $slug): void
+    {
+        Csrf::requireValid();
+        $this->rateLimitSync();
+        $slug = $this->requireSlug($slug);
+        $this->notes->ensure($slug);
+        $body = Http::body();
+        $update = (string) ($body['update'] ?? '');
+        $client = (int) ($body['client'] ?? 0);
+        $snapshot = !empty($body['snapshot']);
+        try {
+            $data = $this->yjs->append($slug, $update, $client, $snapshot);
+        } catch (\InvalidArgumentException $e) {
+            Http::error('sync', $e->getMessage());
+        }
+        $last = $data['updates'][count($data['updates']) - 1] ?? null;
+        Http::json(['seq' => $data['seq'], 'update' => $last]);
+    }
+
     private function presence(string $slug): void
     {
         Csrf::requireValid();
@@ -211,11 +273,10 @@ final class Kernel
 
     private function sse(string $slug): void
     {
-        if (PHP_SAPI === 'cli-server') {
-            header('Content-Type: text/event-stream');
-            echo "event: ping\ndata: {\"poll\":true}\n\n";
-            exit;
-        }
+        $slug = $this->requireSlug($slug);
+        $this->notes->ensure($slug);
+        session_write_close();
+        ignore_user_abort(true);
         set_time_limit(0);
         header('Content-Type: text/event-stream');
         header('Cache-Control: no-cache');
@@ -225,28 +286,32 @@ final class Kernel
             ob_end_flush();
         }
         $start = time();
-        $lastRev = -1;
+        $lastSeq = (int) ($_GET['since'] ?? 0);
         $lastPing = 0;
+        $lastOnline = -1;
         while (time() - $start < 55) {
             if (connection_aborted()) {
                 break;
             }
+            $pack = $this->yjs->since($slug, $lastSeq);
+            foreach ($pack['updates'] as $row) {
+                $lastSeq = (int) $row['seq'];
+                echo "event: y\n";
+                echo 'data: ' . json_encode($row, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n\n";
+            }
             $note = $this->notes->get($slug, false);
-            $rev = (int) ($note['rev'] ?? 0);
-            if ($rev !== $lastRev) {
-                $lastRev = $rev;
-                echo 'event: note' . "\n";
-                echo 'data: ' . json_encode(['rev' => $rev, 'updated_by' => $note['updated_by'] ?? ''], JSON_UNESCAPED_UNICODE) . "\n\n";
-                echo 'event: presence' . "\n";
-                echo 'data: ' . json_encode(['online' => count($note['presence'] ?? [])]) . "\n\n";
-                flush();
+            $online = count($note['presence'] ?? []);
+            if ($online !== $lastOnline) {
+                $lastOnline = $online;
+                echo "event: presence\n";
+                echo 'data: ' . json_encode(['online' => $online, 'users' => $this->notes->publicNote($note)['presence'] ?? []], JSON_UNESCAPED_UNICODE) . "\n\n";
             }
-            if (time() - $lastPing >= 15) {
+            if (time() - $lastPing >= 12) {
                 $lastPing = time();
-                echo "event: ping\ndata: {}\n\n";
-                flush();
+                echo "event: ping\ndata: {\"seq\":{$lastSeq}}\n\n";
             }
-            usleep(400000);
+            flush();
+            usleep(50000);
         }
         exit;
     }
@@ -293,7 +358,7 @@ final class Kernel
             $n['updated_by'] = SessionService::displayName();
             return $n;
         });
-        Http::json(['rev' => $result['rev']]);
+        Http::json(['rev' => $result['rev'], 'content' => (string) $rec['content']]);
     }
 
     private function clearHistory(string $slug): void
@@ -356,5 +421,16 @@ final class Kernel
         }
         $hits[] = $now;
         $_SESSION['put_hits'] = $hits;
+    }
+
+    private function rateLimitSync(): void
+    {
+        $now = time();
+        $hits = array_values(array_filter($_SESSION['sync_hits'] ?? [], fn ($t) => $t > $now - 60));
+        if (count($hits) >= 400) {
+            Http::error('rate', 'Terlalu banyak sync', 429);
+        }
+        $hits[] = $now;
+        $_SESSION['sync_hits'] = $hits;
     }
 }

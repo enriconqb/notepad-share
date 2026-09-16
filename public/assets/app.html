@@ -798,6 +798,7 @@ kbd{
 
 <script type="module">
 import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10.9.1/+esm';
+import * as Y from 'https://cdn.jsdelivr.net/npm/yjs@13.6.18/+esm';
 
 const BASE = window.NS_BASE || '';
 const ROOM = window.NS_SLUG || 'default';
@@ -809,10 +810,17 @@ let rev = 1;
 let format = 'md';
 let encrypted = false;
 let applyingRemote = false;
-let typingUntil = 0;
 let saveTimer = null;
 let previewTimer = null;
+let persistTimer = null;
+let syncTimer = null;
 let es = null;
+let ySeq = 0;
+let syncReady = false;
+const pendingUpdates = [];
+
+const ydoc = new Y.Doc();
+const ytext = ydoc.getText('content');
 
 let pqc = null;
 try {
@@ -855,6 +863,106 @@ function api(path, opts = {}) {
     });
 }
 
+function u8ToB64(u8) {
+  let s = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < u8.length; i += chunk) {
+    s += String.fromCharCode(...u8.subarray(i, i + chunk));
+  }
+  return btoa(s);
+}
+function b64ToU8(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+function applyYUpdate(row) {
+  if (!row?.update) return;
+  if ((row.seq || 0) <= ySeq) return;
+  if (row.client === ydoc.clientID) {
+    ySeq = row.seq;
+    return;
+  }
+  Y.applyUpdate(ydoc, b64ToU8(row.update), 'remote');
+  ySeq = Math.max(ySeq, row.seq || ySeq);
+}
+
+function setYText(str) {
+  const cur = ytext.toString();
+  if (cur === str) return;
+  ydoc.transact(() => {
+    ytext.delete(0, ytext.length);
+    if (str) ytext.insert(0, str);
+  }, 'local');
+}
+
+function syncEditorFromY() {
+  const next = ytext.toString();
+  if (editor.value === next) return;
+  applyingRemote = true;
+  const start = editor.selectionStart;
+  const end = editor.selectionEnd;
+  editor.value = next;
+  const max = next.length;
+  editor.selectionStart = Math.min(start, max);
+  editor.selectionEnd = Math.min(end, max);
+  applyingRemote = false;
+  updateCursor();
+  schedulePreview();
+}
+
+function diffApplyToY(newVal) {
+  const oldVal = ytext.toString();
+  if (oldVal === newVal) return;
+  let start = 0;
+  const minLen = Math.min(oldVal.length, newVal.length);
+  while (start < minLen && oldVal.charCodeAt(start) === newVal.charCodeAt(start)) start++;
+  let endOld = oldVal.length;
+  let endNew = newVal.length;
+  while (endOld > start && endNew > start && oldVal.charCodeAt(endOld - 1) === newVal.charCodeAt(endNew - 1)) {
+    endOld--;
+    endNew--;
+  }
+  ydoc.transact(() => {
+    if (endOld > start) ytext.delete(start, endOld - start);
+    if (endNew > start) ytext.insert(start, newVal.slice(start, endNew));
+  }, 'local');
+}
+
+function scheduleSyncFlush() {
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(flushSync, 30);
+}
+
+async function flushSync() {
+  if (!pendingUpdates.length || !csrf) return;
+  const merged = pendingUpdates.length === 1 ? pendingUpdates[0] : Y.mergeUpdates(pendingUpdates);
+  pendingUpdates.length = 0;
+  try {
+    const res = await api(`/api/notes/${ROOM}/sync`, {
+      method: 'POST',
+      json: { update: u8ToB64(merged), client: ydoc.clientID },
+    });
+    if (res.seq) ySeq = Math.max(ySeq, res.seq);
+  } catch (e) {
+    console.warn('sync', e);
+  }
+}
+
+ydoc.on('update', (update, origin) => {
+  if (origin === 'remote' || !syncReady) return;
+  pendingUpdates.push(update);
+  scheduleSyncFlush();
+  markUnsaved();
+  schedulePersist();
+});
+
+ytext.observe(() => {
+  if (!applyingRemote) syncEditorFromY();
+});
+
 async function loadSession() {
   const s = await api('/api/session');
   csrf = s.csrf;
@@ -893,7 +1001,7 @@ function applyFormat(f) {
 }
 $('format-select').addEventListener('change', () => {
   applyFormat($('format-select').value);
-  scheduleSave();
+  schedulePersist();
   schedulePreview();
 });
 
@@ -1026,82 +1134,85 @@ async function renderPreview() {
 
 function schedulePreview() {
   clearTimeout(previewTimer);
-  previewTimer = setTimeout(renderPreview, 320);
+  previewTimer = setTimeout(renderPreview, 280);
 }
 
-async function pullNote(force = false) {
+async function pullMeta() {
   const note = await api(`/api/notes/${ROOM}`);
-  if (!force && Date.now() < typingUntil && note.rev !== rev) {
-    toast('Diperbarui dari rekan — simpan dulu atau tunggu', 'error');
-    return note;
-  }
-  applyingRemote = true;
   rev = note.rev;
   format = note.format || 'md';
   encrypted = !!note.encrypted;
   applyFormat(format);
-  if (editor.value !== note.content) editor.value = note.content;
   $('retention-select').value = String(note.retention_ms ?? 86400000);
   renderUsers(note.presence || []);
-  $('st-save').textContent = 'Saved';
-  applyingRemote = false;
-  updateCursor();
-  schedulePreview();
   return note;
 }
 
-function scheduleSave() {
-  if (applyingRemote) return;
-  markUnsaved();
-  typingUntil = Date.now() + 800;
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(pushNote, 400);
+async function bootstrapYjs(note) {
+  const pack = await api(`/api/notes/${ROOM}/sync?since=0`);
+  applyingRemote = true;
+  for (const row of (pack.updates || [])) {
+    if (!row?.update) continue;
+    Y.applyUpdate(ydoc, b64ToU8(row.update), 'remote');
+    ySeq = Math.max(ySeq, row.seq || 0);
+  }
+  applyingRemote = false;
+  if (ySeq === 0 && note.content) {
+    setYText(note.content);
+    syncEditorFromY();
+    syncReady = true;
+    const full = Y.encodeStateAsUpdate(ydoc);
+    try {
+      const res = await api(`/api/notes/${ROOM}/sync`, {
+        method: 'POST',
+        json: { update: u8ToB64(full), client: ydoc.clientID, snapshot: true },
+      });
+      if (res.seq) ySeq = res.seq;
+    } catch (_) {}
+    return;
+  }
+  syncEditorFromY();
+  syncReady = true;
 }
 
-async function pushNote() {
+function schedulePersist() {
+  clearTimeout(persistTimer);
+  persistTimer = setTimeout(persistPlain, 1200);
+}
+
+async function persistPlain() {
   try {
     $('st-save').textContent = 'Saving';
-    const res = await api(`/api/notes/${ROOM}`, {
-      method: 'PUT',
+    const res = await api(`/api/notes/${ROOM}/persist`, {
+      method: 'POST',
       json: {
-        base_rev: rev,
-        content: editor.value,
+        content: ytext.toString(),
         format,
         retention_ms: parseInt($('retention-select').value, 10),
-        encrypted: encrypted || editor.value.startsWith('PQC1:') || editor.value.startsWith('AES1:'),
+        encrypted: encrypted || ytext.toString().startsWith('PQC1:') || ytext.toString().startsWith('AES1:'),
       },
     });
     rev = res.rev;
     $('st-save').textContent = 'Saved';
-  } catch (err) {
-    if (err.status === 409 && err.data) {
-      applyingRemote = true;
-      rev = err.data.rev;
-      format = err.data.format || format;
-      encrypted = !!err.data.encrypted;
-      editor.value = err.data.content;
-      applyingRemote = false;
-      toast('Revisi bentrok — memuat versi server', 'error');
-      schedulePreview();
-    } else {
-      toast(err.message, 'error');
-    }
+  } catch (e) {
+    $('st-save').textContent = 'Error';
   }
 }
 
 editor.addEventListener('input', () => {
-  scheduleSave();
+  if (applyingRemote) return;
+  diffApplyToY(editor.value);
   schedulePreview();
   updateCursor();
 });
 
 function renderUsers(presence) {
-  const users = presence.slice(0, 5);
+  const users = (presence || []).slice(0, 5);
   $('users-stack').innerHTML = users.map((u) => {
     const isMe = u.display_name === me.display_name;
     return `<div class="user-avatar ${isMe ? 'me' : ''}" style="background:${u.color}" title="${u.display_name}">${(u.display_name || '??').slice(-2)}</div>`;
   }).join('');
-  $('di-online').textContent = String(presence.length || 1);
+  $('di-online').textContent = String((presence || []).length || 1);
 }
 
 async function heartbeat() {
@@ -1114,23 +1225,28 @@ async function heartbeat() {
 function setConn(online) {
   $('conn-dot').classList.toggle('offline', !online);
   $('st-dot').classList.toggle('off', !online);
-  $('st-conn').textContent = online ? 'Connected' : 'Offline';
+  $('st-conn').textContent = online ? 'Live' : 'Polling';
 }
 
 function connectSSE() {
   if (es) es.close();
-  es = new EventSource(BASE + `/api/notes/${ROOM}/events`);
+  es = new EventSource(BASE + `/api/notes/${ROOM}/events?since=${ySeq}`);
   es.addEventListener('open', () => setConn(true));
   es.addEventListener('error', () => {
     setConn(false);
     es.close();
     es = null;
+    setTimeout(connectSSE, 800);
   });
-  es.addEventListener('note', async (ev) => {
-    const data = JSON.parse(ev.data || '{}');
-    if (data.rev && data.rev > rev && Date.now() > typingUntil) {
-      await pullNote(true);
-    }
+  es.addEventListener('y', (ev) => {
+    try { applyYUpdate(JSON.parse(ev.data || '{}')); } catch (_) {}
+  });
+  es.addEventListener('presence', (ev) => {
+    try {
+      const d = JSON.parse(ev.data || '{}');
+      if (d.users) renderUsers(d.users);
+      if (typeof d.online === 'number') $('di-online').textContent = String(d.online);
+    } catch (_) {}
   });
 }
 
@@ -1139,17 +1255,18 @@ function startPollFallback() {
   if (pollTimer) return;
   pollTimer = setInterval(async () => {
     try {
-      const note = await api(`/api/notes/${ROOM}`);
-      if (note.rev > rev && Date.now() > typingUntil) await pullNote(true);
-      setConn(true);
+      const pack = await api(`/api/notes/${ROOM}/sync?since=${ySeq}`);
+      for (const row of (pack.updates || [])) applyYUpdate(row);
+      setConn(!!es);
     } catch (_) {
       setConn(false);
     }
-  }, 1500);
+  }, 300);
 }
 
 async function saveSnapshot() {
   try {
+    await persistPlain();
     await api(`/api/notes/${ROOM}/history`, { method: 'POST', json: {} });
     await updateHistoryUI();
   } catch (e) {
@@ -1176,8 +1293,8 @@ async function updateHistoryUI() {
       </div>`).join('');
     el.querySelectorAll('.history-item').forEach((item) => {
       item.addEventListener('click', async () => {
-        await api(`/api/notes/${ROOM}/history/${item.dataset.id}/restore`, { method: 'POST', json: {} });
-        await pullNote(true);
+        const restored = await api(`/api/notes/${ROOM}/history/${item.dataset.id}/restore`, { method: 'POST', json: {} });
+        if (restored.content != null) setYText(restored.content);
         toast('History dipulihkan', 'success');
         closeDrawer();
       });
@@ -1187,7 +1304,7 @@ async function updateHistoryUI() {
   }
 }
 
-$('retention-select').addEventListener('change', () => scheduleSave());
+$('retention-select').addEventListener('change', () => schedulePersist());
 
 function openDB() {
   return new Promise((res, rej) => {
@@ -1311,11 +1428,11 @@ async function doDecrypt() {
   if (!input) { toast('Paste ciphertext dulu', 'error'); return; }
   try {
     if (!pqcKeys) await loadKeys();
-    editor.value = await decryptText(input);
+    setYText(await decryptText(input));
     encrypted = false;
     closeModal('modal-decrypt');
     $('decrypt-input').value = '';
-    scheduleSave();
+    schedulePersist();
     schedulePreview();
     toast('Berhasil didekripsi', 'success');
   } catch (e) {
@@ -1368,11 +1485,11 @@ $('btn-lock-pass').addEventListener('click', async () => {
   const pass = $('pass-input').value;
   if (pass.length < 4) { toast('Passphrase terlalu pendek', 'error'); return; }
   try {
-    editor.value = await encryptWithPass(editor.value, pass);
+    setYText(await encryptWithPass(ytext.toString(), pass));
     encrypted = true;
     roomAesKey = pass;
     closeModal('modal-pass');
-    scheduleSave();
+    schedulePersist();
     schedulePreview();
     toast('Ruang dikunci', 'success');
   } catch (e) { toast(e.message, 'error'); }
@@ -1380,11 +1497,11 @@ $('btn-lock-pass').addEventListener('click', async () => {
 $('btn-unlock-pass').addEventListener('click', async () => {
   const pass = $('pass-input').value;
   try {
-    editor.value = await decryptWithPass(editor.value, pass);
+    setYText(await decryptWithPass(ytext.toString(), pass));
     encrypted = false;
     roomAesKey = pass;
     closeModal('modal-pass');
-    scheduleSave();
+    schedulePersist();
     schedulePreview();
     toast('Ruang dibuka', 'success');
   } catch (e) { toast('Passphrase salah', 'error'); }
@@ -1444,7 +1561,8 @@ function toast(msg, type = '') {
   mermaid.initialize({ startOnLoad: false, theme: state.theme === 'dark' ? 'dark' : 'default', securityLevel: 'strict' });
   await loadSession();
   await loadKeys();
-  await pullNote(true);
+  const note = await pullMeta();
+  await bootstrapYjs(note);
   await updateHistoryUI();
   connectSSE();
   startPollFallback();

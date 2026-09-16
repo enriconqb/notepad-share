@@ -8,6 +8,7 @@ use App\NoteStore;
 use App\Router;
 use App\SessionService;
 use App\UploadStore;
+use App\YjsStore;
 
 $root = dirname(__DIR__);
 require $root . '/vendor/autoload.php';
@@ -50,6 +51,7 @@ $kernel = new Kernel(
     new HistoryStore($data),
     new UploadStore($data),
     new MarkdownRenderer(),
+    new YjsStore($data),
     BASE_PATH,
     $root . '/app/views',
     $root . '/public',

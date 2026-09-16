@@ -2,5 +2,6 @@ vendor/
 data/notes/*.json
 data/history/**
 data/uploads/**
+data/yjs/*.json
 !data/**/.gitkeep
 !data/.htaccess
