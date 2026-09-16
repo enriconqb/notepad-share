@@ -235,14 +235,18 @@ Cadangan `data/.htaccess`: `Require all denied`.
 
 | Metode | Path | Handler | Auth |
 | --- | --- | --- | --- |
-| GET | `/` | Landing | Session mulai |
-| GET | `/n/{slug}` | Editor `app.html` | Session mulai |
-| GET | `/n/{slug}/img/{id}` | Stream gambar | Session opsional (ruang publik) |
+| GET | `/` | Landing / wizard akses | Session mulai |
+| GET | `/n/{slug}` | Editor jika berhak, selain itu landing | Session |
+| GET | `/n/{slug}/img/{id}` | Stream gambar | Akses ruang |
 | GET | `/api/session` | Profil session | Ya |
 | PATCH | `/api/session` | Ganti `display_name` | Ya + CSRF |
-| POST | `/api/notes` | Buat ruang | Ya + CSRF |
-| GET | `/api/notes/{slug}` | Baca catatan + presence | Ya |
-| PUT | `/api/notes/{slug}` | Simpan content/format/retention | Ya + CSRF |
+| POST | `/api/notes` | Buat ruang (retensi, default unlocked) | Ya + CSRF |
+| GET | `/api/notes/{slug}/access` | Meta ada/kunci/password/owner | Ya |
+| POST | `/api/notes/{slug}/unlock` | Buka kunci dengan password | Ya + CSRF |
+| POST | `/api/notes/{slug}/lock` | Toggle lock (hanya owner) | Ya + CSRF |
+| GET | `/api/notes/{slug}` | Baca catatan + presence | Akses ruang |
+| PUT | `/api/notes/{slug}` | Simpan content/format/retention | Akses + CSRF |
+| DELETE | `/api/notes/{slug}` | Hapus seluruh ruang (hanya owner) | Akses + CSRF |
 | GET | `/api/notes/{slug}/events` | SSE | Ya |
 | POST | `/api/notes/{slug}/presence` | Heartbeat | Ya + CSRF |
 | GET | `/api/notes/{slug}/history` | Daftar snapshot | Ya |
@@ -257,7 +261,7 @@ Cadangan `data/.htaccess`: `Require all denied`.
 - Regex: `^[a-z0-9][a-z0-9-]{1,62}$`
 - Normalisasi ke huruf kecil.
 - Dilarang: `api`, `n`, `assets`, `index`, `.`, `..`.
-- Jika slug tidak ada: GET editor tetap boleh, catatan dibuat lazy saat PUT/POST pertama, atau landing menolak “belum ada” — **keputusan: lazy create** saat GET `/n/{slug}` yang valid, file JSON default kosong.
+- Jika slug tidak ada: GET editor **tidak** membuat ruang. Pengguna diarahkan ke landing untuk pilih retensi dan password, lalu `POST /api/notes`.
 
 ---
 
@@ -276,6 +280,11 @@ Cadangan `data/.htaccess`: `Require all denied`.
   "updated_by": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
   "retention_ms": 86400000,
   "encrypted": false,
+  "owner_session_id": "(internal, tidak dikirim ke klien)",
+  "locked": true,
+  "password_hash": "(internal)",
+  "access_gen": 1,
+  "created_at": "2026-09-16T08:00:00+00:00",
   "presence": [
     {
       "session_id": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
@@ -292,8 +301,10 @@ Cadangan `data/.htaccess`: `Require all denied`.
 | `format` | string | `md` \| `txt` |
 | `content` | string | UTF-8; jika `encrypted` true, prefix `PQC1:` atau `AES1:` |
 | `rev` | int | >= 1; increment atomik di dalam `flock` |
-| `retention_ms` | int | lihat §10; `0` = permanen |
+| `retention_ms` | int | lihat §10; `0` = permanen; juga TTL ruang dari `created_at` |
 | `encrypted` | bool | server tidak mendekripsi |
+| `locked` | bool | default `false` pada ruang baru; lock wajib password baru; unlock menghapus hash |
+| `has_password` / `is_owner` | bool | hanya di payload publik, bukan file JSON |
 
 Tulis file: buka `c+b`, `flock(LOCK_EX)`, baca, ubah, `ftruncate`, tulis, `fflush`, unlock.
 
@@ -505,9 +516,11 @@ Atribut: `href` (hanya `http`, `https`, `mailto`, path relatif `/n/`), `src` (ha
 | Permanen | `0` |
 
 - Disimpan di JSON catatan (bukan hanya `localStorage` prototipe).
-- Prune: `cron/prune.php` dan juga saat GET history / tiap 5 menit di request (throttled per slug).
-- Jika `retention_ms === 0`, prune tidak menghapus.
-- Hapus manual: DELETE history ruang, tidak menghapus catatan aktif.
+- Prune history: `cron/prune.php` dan juga saat GET history / tiap 5 menit di request (throttled per slug).
+- Jika `retention_ms === 0`, prune tidak menghapus history maupun ruang.
+- Jika `retention_ms > 0` dan `created_at + retention_ms` sudah lewat, **seluruh ruang** (note, history, yjs, uploads) dihapus sehingga slug bisa dibuat ulang.
+- Hapus manual history: DELETE history ruang, tidak menghapus catatan aktif.
+- Hapus manual ruang: `DELETE /api/notes/{slug}` (hanya owner).
 
 ---
 
@@ -526,7 +539,7 @@ Sumber visual: `collabmark.html`. Merek: **Notepad Share**, mark **NS**, gradien
 
 ### 12.1 Header
 
-Brand, room-chip (titik connected/offline + `#slug`, klik = copy URL), users-stack, spacer, tombol tema, tombol PQC, menu drawer.
+Brand, room-chip, users-stack, spacer, tombol **lock/unlock ruang** (hanya owner, di kiri tema), tombol tema, tombol PQC, menu drawer.
 
 ### 12.2 Mode bar
 

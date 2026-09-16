@@ -81,6 +81,9 @@ final class HistoryStore
                 $n++;
             }
         }
+        if (is_dir($dir)) {
+            @rmdir($dir);
+        }
         return $n;
     }
 

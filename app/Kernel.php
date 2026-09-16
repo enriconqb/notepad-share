@@ -38,8 +38,12 @@ final class Kernel
         $r->add('GET', '/api/session', fn () => Http::json(SessionService::payload()));
         $r->add('PATCH', '/api/session', fn () => $this->patchSession());
         $r->add('POST', '/api/notes', fn () => $this->createNote());
+        $r->add('GET', '/api/notes/(?P<slug>[a-z0-9-]+)/access', fn (string $slug) => $this->accessMeta($slug));
+        $r->add('POST', '/api/notes/(?P<slug>[a-z0-9-]+)/unlock', fn (string $slug) => $this->unlockNote($slug));
+        $r->add('POST', '/api/notes/(?P<slug>[a-z0-9-]+)/lock', fn (string $slug) => $this->toggleLock($slug));
         $r->add('GET', '/api/notes/(?P<slug>[a-z0-9-]+)', fn (string $slug) => $this->getNote($slug));
         $r->add('PUT', '/api/notes/(?P<slug>[a-z0-9-]+)', fn (string $slug) => $this->putNote($slug));
+        $r->add('DELETE', '/api/notes/(?P<slug>[a-z0-9-]+)', fn (string $slug) => $this->deleteNote($slug));
         $r->add('POST', '/api/notes/(?P<slug>[a-z0-9-]+)/persist', fn (string $slug) => $this->persistNote($slug));
         $r->add('GET', '/api/notes/(?P<slug>[a-z0-9-]+)/sync', fn (string $slug) => $this->getSync($slug));
         $r->add('POST', '/api/notes/(?P<slug>[a-z0-9-]+)/sync', fn (string $slug) => $this->postSync($slug));
@@ -67,9 +71,52 @@ final class Kernel
         return $slug;
     }
 
-    private function landing(): void
+    private function loadLiveNote(string $slug): ?array
+    {
+        $note = $this->notes->get($slug, false);
+        if ($note === null) {
+            return null;
+        }
+        if ($this->notes->isExpired($note)) {
+            $this->destroyRoom($slug);
+            return null;
+        }
+        return $note;
+    }
+
+    private function destroyRoom(string $slug): void
+    {
+        $this->history->deleteAll($slug);
+        $this->yjs->delete($slug);
+        $this->uploads->deleteSlug($slug);
+        $this->notes->destroy($slug);
+        unset($_SESSION['room_unlock'][$slug]);
+    }
+
+    private function requireRoomAccess(string $slug): array
+    {
+        $slug = $this->requireSlug($slug);
+        $note = $this->loadLiveNote($slug);
+        if ($note === null) {
+            Http::error('not_found', 'Ruang tidak ditemukan', 404);
+        }
+        if (!$this->notes->canAccess($note)) {
+            $code = $this->notes->hasPassword($note) ? 'locked' : 'forbidden';
+            $msg = $code === 'locked' ? 'Ruang terkunci. Masukkan password.' : 'Ruang dikunci dan tidak dapat diakses.';
+            Http::error($code, $msg, 403);
+        }
+        return $note;
+    }
+
+    private function landing(?string $prefillSlug = null): void
     {
         $base = htmlspecialchars($this->basePath, ENT_QUOTES, 'UTF-8');
+        if ($prefillSlug === null) {
+            $prefillSlug = Slug::normalize((string) ($_GET['slug'] ?? ''));
+        }
+        if ($prefillSlug !== '' && !Slug::valid($prefillSlug)) {
+            $prefillSlug = '';
+        }
         include $this->views . '/landing.php';
         exit;
     }
@@ -77,7 +124,11 @@ final class Kernel
     private function editor(string $slug): void
     {
         $slug = $this->requireSlug($slug);
-        $this->notes->ensure($slug);
+        $note = $this->loadLiveNote($slug);
+        if ($note === null || !$this->notes->canAccess($note)) {
+            $this->landing($slug);
+            return;
+        }
         $html = file_get_contents($this->publicDir . '/assets/app.html');
         $html = str_replace(
             ['{{BASE}}', '{{SLUG}}'],
@@ -91,7 +142,7 @@ final class Kernel
 
     private function image(string $slug, string $id): void
     {
-        $slug = $this->requireSlug($slug);
+        $this->requireRoomAccess($slug);
         $file = $this->uploads->find($slug, $id);
         if (!$file) {
             http_response_code(404);
@@ -115,6 +166,16 @@ final class Kernel
         Http::json(SessionService::payload());
     }
 
+    private function accessMeta(string $slug): void
+    {
+        $slug = $this->requireSlug($slug);
+        $note = $this->loadLiveNote($slug);
+        if ($note === null) {
+            Http::json(['exists' => false, 'locked' => false, 'has_password' => false, 'is_owner' => false]);
+        }
+        Http::json($this->notes->accessMeta($note));
+    }
+
     private function createNote(): void
     {
         Csrf::requireValid();
@@ -123,23 +184,96 @@ final class Kernel
         if (!Slug::valid($slug)) {
             Http::error('slug', 'Slug tidak valid');
         }
-        if (is_file($this->notes->path($slug))) {
+        $existing = $this->loadLiveNote($slug);
+        if ($existing !== null) {
             Http::error('exists', 'Slug sudah dipakai', 409);
         }
-        $note = $this->notes->ensure($slug);
+        $this->notes->destroy($slug);
         $format = ($body['format'] ?? 'md') === 'txt' ? 'txt' : 'md';
-        $note = $this->notes->save($slug, function (array $n) use ($format) {
+        $retention = NoteStore::normalizeRetention($body['retention_ms'] ?? 86400000);
+        $note = $this->notes->ensure($slug);
+        $note = $this->notes->save($slug, function (array $n) use ($format, $retention) {
             $n['format'] = $format;
+            $n['retention_ms'] = $retention;
+            $n['locked'] = false;
+            $n['owner_session_id'] = SessionService::id();
+            $n['password_hash'] = null;
+            $n['access_gen'] = 1;
+            $n['created_at'] = gmdate('c');
             return $n;
         });
         Http::json(['slug' => $note['slug']], 201);
     }
 
+    private function unlockNote(string $slug): void
+    {
+        Csrf::requireValid();
+        $this->rateLimitUnlock();
+        $slug = $this->requireSlug($slug);
+        $note = $this->loadLiveNote($slug);
+        if ($note === null) {
+            Http::error('not_found', 'Ruang tidak ditemukan', 404);
+        }
+        if ($this->notes->isOwner($note) || !$this->notes->isLocked($note)) {
+            $this->notes->grantUnlock($slug, $note);
+            Http::json(['ok' => true]);
+        }
+        if (!$this->notes->hasPassword($note)) {
+            Http::error('forbidden', 'Ruang dikunci dan tidak dapat diakses.', 403);
+        }
+        $password = (string) (Http::body()['password'] ?? '');
+        if (!password_verify($password, (string) $note['password_hash'])) {
+            Http::error('password', 'Password salah', 403);
+        }
+        $this->notes->grantUnlock($slug, $note);
+        Http::json(['ok' => true]);
+    }
+
+    private function toggleLock(string $slug): void
+    {
+        Csrf::requireValid();
+        $note = $this->requireRoomAccess($slug);
+        if (!$this->notes->isOwner($note)) {
+            Http::error('forbidden', 'Hanya pembuat ruang yang dapat mengubah kunci', 403);
+        }
+        $body = Http::body();
+        $locked = (bool) ($body['locked'] ?? true);
+        $password = (string) ($body['password'] ?? '');
+        if ($locked && $password === '') {
+            Http::error('password', 'Password wajib diisi untuk mengunci ruang');
+        }
+        $result = $this->notes->save($slug, function (array $n) use ($locked, $password) {
+            $n['locked'] = $locked;
+            $n['access_gen'] = (int) ($n['access_gen'] ?? 1) + 1;
+            if ($locked) {
+                $n['password_hash'] = password_hash($password, PASSWORD_DEFAULT);
+            } else {
+                $n['password_hash'] = null;
+            }
+            return $n;
+        });
+        Http::json($this->notes->publicNote($result));
+    }
+
+    private function deleteNote(string $slug): void
+    {
+        Csrf::requireValid();
+        $note = $this->requireRoomAccess($slug);
+        if (!$this->notes->isOwner($note)) {
+            Http::error('forbidden', 'Hanya pembuat ruang yang dapat menghapus', 403);
+        }
+        $this->destroyRoom($slug);
+        Http::json(['ok' => true, 'deleted' => true]);
+    }
+
     private function getNote(string $slug): void
     {
-        $slug = $this->requireSlug($slug);
-        $note = $this->notes->ensure($slug);
+        $note = $this->requireRoomAccess($slug);
         $this->maybePrune($note);
+        $note = $this->loadLiveNote($slug);
+        if ($note === null) {
+            Http::error('not_found', 'Ruang tidak ditemukan', 404);
+        }
         Http::json($this->notes->publicNote($note), 200, ['ETag' => '"' . $note['rev'] . '"']);
     }
 
@@ -147,7 +281,7 @@ final class Kernel
     {
         Csrf::requireValid();
         $this->rateLimitPuts();
-        $slug = $this->requireSlug($slug);
+        $this->requireRoomAccess($slug);
         $body = Http::body();
         $baseRev = (int) ($body['base_rev'] ?? -1);
         $content = (string) ($body['content'] ?? '');
@@ -164,7 +298,7 @@ final class Kernel
                 $n['format'] = $body['format'] === 'txt' ? 'txt' : 'md';
             }
             if (isset($body['retention_ms'])) {
-                $n['retention_ms'] = (int) $body['retention_ms'];
+                $n['retention_ms'] = NoteStore::normalizeRetention($body['retention_ms']);
             }
             if (isset($body['encrypted'])) {
                 $n['encrypted'] = (bool) $body['encrypted'];
@@ -187,7 +321,7 @@ final class Kernel
     private function persistNote(string $slug): void
     {
         Csrf::requireValid();
-        $slug = $this->requireSlug($slug);
+        $this->requireRoomAccess($slug);
         $body = Http::body();
         $content = (string) ($body['content'] ?? '');
         if (strlen($content) > 1572864) {
@@ -204,7 +338,7 @@ final class Kernel
                 $n['format'] = $body['format'] === 'txt' ? 'txt' : 'md';
             }
             if (isset($body['retention_ms'])) {
-                $n['retention_ms'] = (int) $body['retention_ms'];
+                $n['retention_ms'] = NoteStore::normalizeRetention($body['retention_ms']);
             }
             if (isset($body['encrypted'])) {
                 $n['encrypted'] = (bool) $body['encrypted'];
@@ -216,8 +350,7 @@ final class Kernel
 
     private function getSync(string $slug): void
     {
-        $slug = $this->requireSlug($slug);
-        $this->notes->ensure($slug);
+        $this->requireRoomAccess($slug);
         $since = (int) ($_GET['since'] ?? 0);
         Http::json($this->yjs->since($slug, $since));
     }
@@ -226,8 +359,7 @@ final class Kernel
     {
         Csrf::requireValid();
         $this->rateLimitSync();
-        $slug = $this->requireSlug($slug);
-        $this->notes->ensure($slug);
+        $this->requireRoomAccess($slug);
         $body = Http::body();
         $update = (string) ($body['update'] ?? '');
         $client = (int) ($body['client'] ?? 0);
@@ -244,7 +376,7 @@ final class Kernel
     private function presence(string $slug): void
     {
         Csrf::requireValid();
-        $slug = $this->requireSlug($slug);
+        $this->requireRoomAccess($slug);
         $note = $this->notes->save($slug, function (array $n) {
             $n['presence'] = $this->notes->freshPresence($n['presence'] ?? []);
             $found = false;
@@ -273,8 +405,7 @@ final class Kernel
 
     private function sse(string $slug): void
     {
-        $slug = $this->requireSlug($slug);
-        $this->notes->ensure($slug);
+        $this->requireRoomAccess($slug);
         session_write_close();
         ignore_user_abort(true);
         set_time_limit(0);
@@ -300,6 +431,9 @@ final class Kernel
                 echo 'data: ' . json_encode($row, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n\n";
             }
             $note = $this->notes->get($slug, false);
+            if ($note === null) {
+                break;
+            }
             $online = count($note['presence'] ?? []);
             if ($online !== $lastOnline) {
                 $lastOnline = $online;
@@ -318,8 +452,7 @@ final class Kernel
 
     private function listHistory(string $slug): void
     {
-        $slug = $this->requireSlug($slug);
-        $note = $this->notes->ensure($slug);
+        $note = $this->requireRoomAccess($slug);
         $this->history->prune($slug, (int) $note['retention_ms']);
         $items = [];
         foreach ($this->history->list($slug, 50) as $row) {
@@ -337,8 +470,7 @@ final class Kernel
     private function addHistory(string $slug): void
     {
         Csrf::requireValid();
-        $slug = $this->requireSlug($slug);
-        $note = $this->notes->ensure($slug);
+        $note = $this->requireRoomAccess($slug);
         $rec = $this->history->add($slug, (string) $note['content'], SessionService::displayName(), SessionService::id());
         Http::json(['ok' => true, 'id' => $rec['id'] ?? null]);
     }
@@ -346,7 +478,7 @@ final class Kernel
     private function restoreHistory(string $slug, string $id): void
     {
         Csrf::requireValid();
-        $slug = $this->requireSlug($slug);
+        $this->requireRoomAccess($slug);
         $rec = $this->history->get($slug, $id);
         if (!$rec) {
             Http::error('history', 'Snapshot tidak ditemukan', 404);
@@ -364,7 +496,7 @@ final class Kernel
     private function clearHistory(string $slug): void
     {
         Csrf::requireValid();
-        $slug = $this->requireSlug($slug);
+        $this->requireRoomAccess($slug);
         $n = $this->history->deleteAll($slug);
         Http::json(['deleted' => $n]);
     }
@@ -372,8 +504,7 @@ final class Kernel
     private function upload(string $slug): void
     {
         Csrf::requireValid();
-        $slug = $this->requireSlug($slug);
-        $this->notes->ensure($slug);
+        $this->requireRoomAccess($slug);
         try {
             $info = $this->uploads->save($slug, $_FILES['file'] ?? [], $this->basePath);
         } catch (\InvalidArgumentException $e) {
@@ -409,6 +540,10 @@ final class Kernel
             return;
         }
         $_SESSION[$key] = $now;
+        if ($this->notes->isExpired($note)) {
+            $this->destroyRoom($slug);
+            return;
+        }
         $this->history->prune($slug, (int) ($note['retention_ms'] ?? 86400000));
     }
 
@@ -432,5 +567,16 @@ final class Kernel
         }
         $hits[] = $now;
         $_SESSION['sync_hits'] = $hits;
+    }
+
+    private function rateLimitUnlock(): void
+    {
+        $now = time();
+        $hits = array_values(array_filter($_SESSION['unlock_hits'] ?? [], fn ($t) => $t > $now - 60));
+        if (count($hits) >= 15) {
+            Http::error('rate', 'Terlalu banyak percobaan password', 429);
+        }
+        $hits[] = $now;
+        $_SESSION['unlock_hits'] = $hits;
     }
 }

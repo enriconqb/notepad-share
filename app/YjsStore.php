@@ -69,4 +69,12 @@ final class YjsStore
     {
         return (int) ($this->load($slug)['seq'] ?? 0);
     }
+
+    public function delete(string $slug): void
+    {
+        $path = $this->path($slug);
+        if (is_file($path)) {
+            unlink($path);
+        }
+    }
 }

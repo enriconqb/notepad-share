@@ -79,4 +79,18 @@ final class UploadStore
         $mime = array_search($ext, self::MIME, true) ?: 'application/octet-stream';
         return ['path' => $path, 'mime' => $mime];
     }
+
+    public function deleteSlug(string $slug): void
+    {
+        $dir = $this->root . '/uploads/' . $slug;
+        if (!is_dir($dir)) {
+            return;
+        }
+        foreach (glob($dir . '/*') ?: [] as $file) {
+            if (is_file($file)) {
+                unlink($file);
+            }
+        }
+        @rmdir($dir);
+    }
 }
