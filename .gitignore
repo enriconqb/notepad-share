@@ -1,0 +1,6 @@
+vendor/
+data/notes/*.json
+data/history/**
+data/uploads/**
+!data/**/.gitkeep
+!data/.htaccess

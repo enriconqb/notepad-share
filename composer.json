@@ -1,0 +1,13 @@
+{
+  "name": "notepad-share/app",
+  "description": "Notepad Share — kolaborasi Markdown/TXT realtime",
+  "require": {
+    "php": "^8.2",
+    "league/commonmark": "^2.6"
+  },
+  "autoload": {
+    "psr-4": {
+      "App\\": "app/"
+    }
+  }
+}
