@@ -104,7 +104,7 @@ final class MarkdownRenderer
                     }
                     if ($name === 'href' && preg_match('#^(https?:|mailto:|/n/)#i', $val) && !preg_match('#^\s*javascript:#i', $val)) {
                         $keep[$name] = $val;
-                    } elseif ($name === 'src' && preg_match('#^/n/[a-z0-9-]+/img/[a-f0-9]+#i', $val)) {
+                    } elseif ($name === 'src' && !preg_match('#^\s*(javascript|data):#i', $val) && preg_match('#/n/[a-z0-9-]+/img/[a-f0-9]+#i', $val)) {
                         $keep[$name] = $val;
                     } elseif (in_array($name, ['alt', 'class'], true)) {
                         $keep[$name] = $val;

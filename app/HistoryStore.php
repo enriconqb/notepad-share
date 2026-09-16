@@ -89,9 +89,7 @@ final class HistoryStore
 
     public function prune(string $slug, int $retentionMs): int
     {
-        if ($retentionMs === 0) {
-            return 0;
-        }
+        $retentionMs = NoteStore::normalizeRetention($retentionMs);
         $cut = (int) round(microtime(true) * 1000) - $retentionMs;
         $n = 0;
         $dir = $this->dir($slug);
@@ -121,7 +119,7 @@ final class HistoryStore
                 continue;
             }
             $slug = (string) ($note['slug'] ?? '');
-            $ret = (int) ($note['retention_ms'] ?? 86400000);
+            $ret = NoteStore::normalizeRetention($note['retention_ms'] ?? 86400000);
             if ($slug !== '') {
                 $n += $this->prune($slug, $ret);
             }

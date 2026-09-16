@@ -213,6 +213,23 @@ input,textarea,select{font-family:inherit;color:inherit}
 }
 #editor::placeholder{color:var(--text-2); opacity:.6}
 #editor::selection{background:var(--accent-soft); color:var(--text-0)}
+.editor-surface{flex:1;min-height:0;display:flex;flex-direction:column;position:relative}
+.editor-visual{
+  display:none;flex:1;min-height:0;overflow:auto;
+  padding:18px 16px 60px;outline:none;
+  font-family:'SF Mono','JetBrains Mono','Fira Code',ui-monospace,monospace;
+  font-size:14.5px;line-height:1.7;white-space:pre-wrap;word-break:break-word;
+  caret-color:var(--accent);
+}
+.editor-visual img,#preview img{max-width:100%;height:auto;border-radius:10px;margin:.5em 0;display:block;box-shadow:var(--shadow-sm)}
+body.fmt-md .editor-visual{display:block}
+body.fmt-md #editor{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;left:0;top:0}
+.retention-nav{display:flex;align-items:center;gap:6px;flex-shrink:0;color:var(--text-2);font-size:11px;font-weight:600}
+.retention-nav .format-select{padding:4px 22px 4px 8px;font-size:11px;max-width:92px}
+.pass-row{display:flex;align-items:center;gap:8px}
+.pass-row input{flex:1;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:var(--bg-2)}
+.pass-toggle{width:38px;height:38px;border-radius:10px;flex-shrink:0;display:grid;place-items:center;color:var(--text-1);background:var(--bg-2);border:1px solid var(--border)}
+.pass-toggle:hover{color:var(--text-0)}
 
 /* Preview */
 #preview{
@@ -528,6 +545,18 @@ kbd{
 
   <div class="spacer"></div>
 
+  <label class="retention-nav" title="Auto-hapus ruang">
+    <span class="brand-text">Auto-hapus</span>
+    <select id="retention-select" class="format-select" aria-label="Auto-hapus">
+      <option value="3600000">1 jam</option>
+      <option value="21600000">6 jam</option>
+      <option value="43200000">12 jam</option>
+      <option value="86400000" selected>1 hari</option>
+      <option value="259200000">3 hari</option>
+      <option value="604800000">7 hari</option>
+    </select>
+  </label>
+
   <button class="icon-btn" id="btn-room-lock" hidden title="Kunci ruang" aria-label="Kunci ruang">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
   </button>
@@ -619,7 +648,10 @@ kbd{
 <main class="main" id="main">
   <section class="pane editor-pane active" id="pane-editor">
     <div class="pane-label">Editor</div>
-    <textarea id="editor" placeholder="Tulis markdown di sini…&#10;&#10;Tip: gunakan toolbar untuk format cepat, atau ketik langsung." spellcheck="false" autocapitalize="sentences" autocomplete="off"></textarea>
+    <div class="editor-surface" id="editor-surface">
+      <textarea id="editor" placeholder="Tulis markdown di sini…&#10;&#10;Tip: gunakan toolbar untuk format cepat, atau ketik langsung." spellcheck="false" autocapitalize="sentences" autocomplete="off"></textarea>
+      <div id="editor-visual" class="editor-visual" contenteditable="true" role="textbox" aria-label="Editor visual"></div>
+    </div>
   </section>
 
   <div class="divider" id="divider" role="separator" aria-orientation="vertical"></div>
@@ -693,21 +725,6 @@ kbd{
 
     <div class="drawer-section">
       <div class="drawer-section-title">History</div>
-      <div class="drawer-item" id="di-retention" style="justify-content:space-between">
-        <span style="display:flex;align-items:center;gap:12px">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-          Auto-hapus
-        </span>
-        <select id="retention-select" class="format-select" style="padding:4px 22px 4px 8px;font-size:11.5px">
-          <option value="3600000">1 jam</option>
-          <option value="21600000">6 jam</option>
-          <option value="43200000">12 jam</option>
-          <option value="86400000" selected>1 hari</option>
-          <option value="259200000">3 hari</option>
-          <option value="604800000">7 hari</option>
-          <option value="0">Permanen</option>
-        </select>
-      </div>
       <div id="history-list"></div>
     </div>
 
@@ -787,7 +804,12 @@ kbd{
   <div class="modal-card">
     <h3 id="access-pass-title">Password akses URL</h3>
     <p class="sub" id="access-pass-sub">Password wajib. Orang lain harus mengisinya untuk membuka URL ini. Unlock lalu lock lagi akan menghapus password lama.</p>
-    <textarea id="access-pass-input" placeholder="Password akses baru…"></textarea>
+    <div class="pass-row">
+      <input id="access-pass-input" type="password" autocomplete="new-password" placeholder="Password akses baru…">
+      <button type="button" class="pass-toggle" id="btn-preview-access-pass" title="Lihat password" aria-label="Lihat password">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+      </button>
+    </div>
     <div class="modal-actions">
       <button class="btn" data-close-modal>Batal</button>
       <button class="btn primary" id="btn-save-access-pass">Simpan &amp; kunci</button>
@@ -923,17 +945,19 @@ function setYText(str) {
 
 function syncEditorFromY() {
   const next = ytext.toString();
-  if (editor.value === next) return;
-  applyingRemote = true;
-  const start = editor.selectionStart;
-  const end = editor.selectionEnd;
-  editor.value = next;
-  const max = next.length;
-  editor.selectionStart = Math.min(start, max);
-  editor.selectionEnd = Math.min(end, max);
-  applyingRemote = false;
+  if (editor.value !== next) {
+    applyingRemote = true;
+    const start = editor.selectionStart;
+    const end = editor.selectionEnd;
+    editor.value = next;
+    const max = next.length;
+    editor.selectionStart = Math.min(start, max);
+    editor.selectionEnd = Math.min(end, max);
+    applyingRemote = false;
+  }
   updateCursor();
   schedulePreview();
+  if (!applyingVisual) refreshVisual();
 }
 
 function diffApplyToY(newVal) {
@@ -1021,6 +1045,9 @@ function applyFormat(f) {
   format = f;
   $('format-select').value = f;
   $('toolbar').hidden = f !== 'md';
+  document.body.classList.toggle('fmt-md', f === 'md');
+  document.body.classList.toggle('fmt-txt', f !== 'md');
+  refreshVisual();
 }
 $('format-select').addEventListener('change', () => {
   applyFormat($('format-select').value);
@@ -1029,6 +1056,65 @@ $('format-select').addEventListener('change', () => {
 });
 
 const editor = $('editor');
+const editorVisual = $('editor-visual');
+let applyingVisual = false;
+
+function escHtml(s) {
+  return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+function resolveImgUrl(url) {
+  if (!url) return url;
+  if (/^https?:\/\//i.test(url) || url.startsWith('data:')) return url;
+  if (BASE && url.startsWith(BASE)) return url;
+  if (url.startsWith('/n/')) return (BASE || '') + url;
+  return url;
+}
+function markdownToEditorHtml(md) {
+  const re = /!\[([^\]]*)\]\(([^)\s]+)\)/g;
+  let html = '';
+  let last = 0;
+  let m;
+  while ((m = re.exec(md))) {
+    html += escHtml(md.slice(last, m.index)).replace(/\n/g, '<br>');
+    html += `<img src="${escHtml(resolveImgUrl(m[2]))}" alt="${escHtml(m[1])}" data-md="${escHtml(m[2])}">`;
+    last = m.index + m[0].length;
+  }
+  html += escHtml(md.slice(last)).replace(/\n/g, '<br>');
+  return html || '<br>';
+}
+function editorHtmlToMarkdown(root) {
+  let out = '';
+  const walk = (node) => {
+    if (node.nodeType === 3) {
+      out += node.nodeValue.replace(/\u00a0/g, ' ');
+      return;
+    }
+    if (node.nodeType !== 1) return;
+    const tag = node.tagName;
+    if (tag === 'IMG') {
+      const stored = node.getAttribute('data-md') || node.getAttribute('src') || '';
+      const alt = node.getAttribute('alt') || 'image';
+      out += `![${alt}](${stored})`;
+      return;
+    }
+    if (tag === 'BR') {
+      out += '\n';
+      return;
+    }
+    if (tag === 'DIV' || tag === 'P') {
+      if (out && !out.endsWith('\n')) out += '\n';
+      node.childNodes.forEach(walk);
+      return;
+    }
+    node.childNodes.forEach(walk);
+  };
+  root.childNodes.forEach(walk);
+  return out.replace(/\n+$/, '');
+}
+function refreshVisual() {
+  if (format !== 'md' || applyingVisual) return;
+  editorVisual.innerHTML = markdownToEditorHtml(editor.value);
+}
 
 function updateCursor() {
   const v = editor.value.slice(0, editor.selectionStart);
@@ -1097,19 +1183,83 @@ const commands = {
 };
 document.querySelectorAll('.tb[data-cmd]').forEach((b) => b.addEventListener('click', () => commands[b.dataset.cmd]?.()));
 
+async function uploadImageFile(file) {
+  if (format !== 'md') {
+    toast('Gambar hanya di mode Markdown', 'error');
+    return;
+  }
+  const fd = new FormData();
+  fd.append('file', file);
+  const res = await api(`/api/notes/${ROOM}/images`, { method: 'POST', body: fd, csrf: true });
+  insertBlock(res.markdown);
+  refreshVisual();
+  toast('Gambar dilampirkan', 'success');
+}
+
+async function consumeImageFiles(fileList) {
+  const files = [...(fileList || [])].filter((f) => f && f.type && f.type.startsWith('image/'));
+  if (!files.length) return false;
+  for (const file of files) {
+    try {
+      await uploadImageFile(file);
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  }
+  return true;
+}
+
 $('image-input').addEventListener('change', async (e) => {
   const file = e.target.files?.[0];
   e.target.value = '';
   if (!file) return;
-  const fd = new FormData();
-  fd.append('file', file);
   try {
-    const res = await api(`/api/notes/${ROOM}/images`, { method: 'POST', body: fd, csrf: true });
-    insertBlock(res.markdown);
-    toast('Gambar dilampirkan', 'success');
+    await uploadImageFile(file);
   } catch (err) {
     toast(err.message, 'error');
   }
+});
+
+function onEditorPaste(e) {
+  const dt = e.clipboardData;
+  if (!dt) return;
+  const files = [];
+  if (dt.files && dt.files.length) {
+    files.push(...dt.files);
+  } else if (dt.items) {
+    for (const item of dt.items) {
+      if (item.kind === 'file' && item.type.startsWith('image/')) {
+        const f = item.getAsFile();
+        if (f) files.push(f);
+      }
+    }
+  }
+  if (files.some((f) => f.type.startsWith('image/'))) {
+    e.preventDefault();
+    consumeImageFiles(files);
+  }
+}
+editor.addEventListener('paste', onEditorPaste);
+editorVisual.addEventListener('paste', onEditorPaste);
+['dragover', 'drop'].forEach((ev) => {
+  $('editor-surface').addEventListener(ev, (e) => {
+    if (![...((e.dataTransfer && e.dataTransfer.files) || [])].some((f) => f.type.startsWith('image/'))) {
+      if (ev === 'drop') return;
+    }
+    e.preventDefault();
+    if (ev === 'drop') consumeImageFiles(e.dataTransfer.files);
+  });
+});
+editorVisual.addEventListener('input', () => {
+  if (applyingRemote || format !== 'md') return;
+  applyingVisual = true;
+  const md = editorHtmlToMarkdown(editorVisual);
+  if (editor.value !== md) {
+    editor.value = md;
+    editor.dispatchEvent(new Event('input'));
+  }
+  applyingVisual = false;
+  updateCursor();
 });
 
 function limitedPreview(text) {
@@ -1555,6 +1705,10 @@ $('btn-room-lock').addEventListener('click', async () => {
 $('di-access-pass').addEventListener('click', () => {
   closeDrawer();
   openAccessPassModal('edit');
+});
+$('btn-preview-access-pass').addEventListener('click', () => {
+  const el = $('access-pass-input');
+  el.type = el.type === 'password' ? 'text' : 'password';
 });
 $('btn-save-access-pass').addEventListener('click', async () => {
   const password = $('access-pass-input').value;

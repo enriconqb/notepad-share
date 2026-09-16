@@ -19,6 +19,9 @@ $prefillSlug = $prefillSlug ?? '';
     input,select{width:100%;padding:12px 14px;border-radius:10px;border:1px solid var(--border);background:#0a0a0f;color:var(--text-0);font-size:15px}
     button{margin-top:16px;width:100%;padding:12px;border:0;border-radius:10px;background:var(--accent);color:#fff;font-weight:700;cursor:pointer;font-size:15px}
     button.secondary{background:transparent;border:1px solid var(--border);color:var(--text-1);margin-top:8px}
+    .pass-row{display:flex;gap:8px;align-items:center}
+    .pass-row input{flex:1;margin:0}
+    .pass-row button{margin:0;width:44px;padding:10px;flex-shrink:0;background:transparent;border:1px solid var(--border);color:var(--text-1)}
     .hint{margin-top:16px;font-size:13px;color:var(--text-2)}
     .err{margin-top:12px;color:var(--danger);font-size:13px;display:none}
     .step{display:none} .step.active{display:block}
@@ -48,7 +51,6 @@ $prefillSlug = $prefillSlug ?? '';
           <option value="86400000" selected>1 hari</option>
           <option value="259200000">3 hari</option>
           <option value="604800000">7 hari</option>
-          <option value="0">Permanen</option>
         </select>
         <p class="hint">Setelah waktu ini ruang dihapus otomatis dan URL yang sama bisa dibuat ulang. Ruang dibuat terbuka; kunci dan password diatur di editor.</p>
         <button type="submit">Buat ruang</button>
@@ -59,7 +61,10 @@ $prefillSlug = $prefillSlug ?? '';
     <div id="step-unlock" class="step">
       <form id="form-unlock">
         <label for="unlock-pass">Password ruang</label>
-        <input id="unlock-pass" type="password" autocomplete="current-password" required>
+        <div class="pass-row">
+          <input id="unlock-pass" type="password" autocomplete="current-password" required>
+          <button type="button" class="secondary" id="btn-preview-unlock" title="Lihat password" aria-label="Lihat password">••</button>
+        </div>
         <p class="hint">Ruang ini terkunci. Masukkan password dari pembuat ruang.</p>
         <button type="submit">Masuk</button>
         <button type="button" class="secondary" id="back-unlock">Kembali</button>
@@ -167,6 +172,10 @@ $prefillSlug = $prefillSlug ?? '';
     $('back-ret').addEventListener('click', () => show('step-slug'));
     $('back-unlock').addEventListener('click', () => show('step-slug'));
     $('back-forb').addEventListener('click', () => show('step-slug'));
+    $('btn-preview-unlock').addEventListener('click', () => {
+      const el = $('unlock-pass');
+      el.type = el.type === 'password' ? 'text' : 'password';
+    });
 
     (async () => {
       try {

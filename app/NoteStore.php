@@ -13,7 +13,6 @@ final class NoteStore
         86400000,
         259200000,
         604800000,
-        0,
     ];
 
     public function __construct(private string $root)
@@ -143,10 +142,7 @@ final class NoteStore
 
     public function isExpired(array $note): bool
     {
-        $ret = (int) ($note['retention_ms'] ?? 86400000);
-        if ($ret === 0) {
-            return false;
-        }
+        $ret = self::normalizeRetention($note['retention_ms'] ?? 86400000);
         $created = strtotime((string) ($note['created_at'] ?? $note['updated_at'] ?? '')) ?: 0;
         if ($created <= 0) {
             return false;
@@ -157,6 +153,9 @@ final class NoteStore
     public static function normalizeRetention(mixed $value): int
     {
         $ms = (int) $value;
+        if ($ms === 0) {
+            return 604800000;
+        }
         return in_array($ms, self::RETENTION_OPTIONS, true) ? $ms : 86400000;
     }
 

@@ -512,13 +512,12 @@ Atribut: `href` (hanya `http`, `https`, `mailto`, path relatif `/n/`), `src` (ha
 | 12 jam | `43200000` |
 | 1 hari (24 jam) | `86400000` (default) |
 | 3 hari | `259200000` |
-| 7 hari | `604800000` |
-| Permanen | `0` |
+| 7 hari | `604800000` (maksimum) |
 
-- Disimpan di JSON catatan (bukan hanya `localStorage` prototipe).
+- Tidak ada opsi permanen. Nilai `0` (lama) dinormalisasi ke 7 hari.
+- Disimpan di JSON catatan. Kontrol retensi di header editor (Auto-hapus).
 - Prune history: `cron/prune.php` dan juga saat GET history / tiap 5 menit di request (throttled per slug).
-- Jika `retention_ms === 0`, prune tidak menghapus history maupun ruang.
-- Jika `retention_ms > 0` dan `created_at + retention_ms` sudah lewat, **seluruh ruang** (note, history, yjs, uploads) dihapus sehingga slug bisa dibuat ulang.
+- Jika `created_at + retention_ms` sudah lewat, **seluruh ruang** (note, history, yjs, uploads) dihapus sehingga slug bisa dibuat ulang.
 - Hapus manual history: DELETE history ruang, tidak menghapus catatan aktif.
 - Hapus manual ruang: `DELETE /api/notes/{slug}` (hanya owner).
 
