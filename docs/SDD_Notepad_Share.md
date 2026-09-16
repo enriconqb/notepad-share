@@ -603,7 +603,7 @@ Kunci di IndexedDB hilang jika user menghapus data situs. Passphrase lemah dapat
 
 - Validasi slug ketat; path traversal ditolak.
 - CSRF pada POST/PUT/PATCH/DELETE.
-- Upload: `finfo_file` MIME; tolak SVG/HTML; re-encode tidak wajib; simpan ekstensi dari MIME.
+- Upload: deteksi MIME via `finfo` jika ada, selain itu `getimagesize` / magic bytes; tolak SVG/HTML.
 - `flock` anti JSON rusak.
 - Batas ukuran `content` PUT 1,5 MB.
 - Rate limit lunak: 30 PUT/menit per session (file counter di `data/ratelimit/` atau session).

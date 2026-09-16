@@ -28,8 +28,10 @@ final class UploadStore
             throw new \InvalidArgumentException('Maksimal 3MB');
         }
         $tmp = (string) ($file['tmp_name'] ?? '');
-        $finfo = new \finfo(FILEINFO_MIME_TYPE);
-        $mime = $finfo->file($tmp) ?: '';
+        if ($tmp === '' || !is_file($tmp)) {
+            throw new \InvalidArgumentException('Unggahan gagal');
+        }
+        $mime = $this->detectMime($tmp);
         if (!isset(self::MIME[$mime])) {
             throw new \InvalidArgumentException('Tipe gambar tidak didukung');
         }
@@ -92,5 +94,36 @@ final class UploadStore
             }
         }
         @rmdir($dir);
+    }
+
+    private function detectMime(string $path): string
+    {
+        if (class_exists(\finfo::class, false)) {
+            $mime = (new \finfo(FILEINFO_MIME_TYPE))->file($path) ?: '';
+            if (isset(self::MIME[$mime])) {
+                return $mime;
+            }
+        }
+        if (function_exists('getimagesize')) {
+            $info = @getimagesize($path);
+            $mime = is_array($info) ? (string) ($info['mime'] ?? '') : '';
+            if (isset(self::MIME[$mime])) {
+                return $mime;
+            }
+        }
+        $head = (string) file_get_contents($path, false, null, 0, 16);
+        if (str_starts_with($head, "\xFF\xD8\xFF")) {
+            return 'image/jpeg';
+        }
+        if (str_starts_with($head, "\x89PNG\r\n\x1A\n")) {
+            return 'image/png';
+        }
+        if (str_starts_with($head, 'GIF87a') || str_starts_with($head, 'GIF89a')) {
+            return 'image/gif';
+        }
+        if (strlen($head) >= 12 && str_starts_with($head, 'RIFF') && substr($head, 8, 4) === 'WEBP') {
+            return 'image/webp';
+        }
+        return '';
     }
 }
