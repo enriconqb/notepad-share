@@ -35,6 +35,7 @@ final class Kernel
         $r->add('GET', '/', fn () => $this->landing());
         $r->add('GET', '/n/(?P<slug>[a-z0-9-]+)', fn (string $slug) => $this->editor($slug));
         $r->add('GET', '/n/(?P<slug>[a-z0-9-]+)/img/(?P<id>[a-f0-9]+)', fn (string $slug, string $id) => $this->image($slug, $id));
+        $r->add('GET', '/n/(?P<slug>[a-z0-9-]+)/file/(?P<id>[a-f0-9]+)', fn (string $slug, string $id) => $this->download($slug, $id));
         $r->add('GET', '/api/session', fn () => Http::json(SessionService::payload()));
         $r->add('PATCH', '/api/session', fn () => $this->patchSession());
         $r->add('POST', '/api/notes', fn () => $this->createNote());
@@ -54,6 +55,8 @@ final class Kernel
         $r->add('POST', '/api/notes/(?P<slug>[a-z0-9-]+)/history/(?P<id>[0-9]+_[a-zA-Z0-9]+)/restore', fn (string $slug, string $id) => $this->restoreHistory($slug, $id));
         $r->add('DELETE', '/api/notes/(?P<slug>[a-z0-9-]+)/history', fn (string $slug) => $this->clearHistory($slug));
         $r->add('POST', '/api/notes/(?P<slug>[a-z0-9-]+)/images', fn (string $slug) => $this->upload($slug));
+        $r->add('GET', '/api/notes/(?P<slug>[a-z0-9-]+)/files', fn (string $slug) => $this->listFiles($slug));
+        $r->add('POST', '/api/notes/(?P<slug>[a-z0-9-]+)/files', fn (string $slug) => $this->uploadFiles($slug));
         $r->add('POST', '/api/preview', fn () => $this->preview());
     }
 
@@ -151,6 +154,24 @@ final class Kernel
         }
         header('Content-Type: ' . $file['mime']);
         header('Cache-Control: public, max-age=86400');
+        readfile($file['path']);
+        exit;
+    }
+
+    private function download(string $slug, string $id): void
+    {
+        $this->requireRoomAccess($slug);
+        $file = $this->uploads->findDownload($slug, $id);
+        if (!$file) {
+            http_response_code(404);
+            echo 'Not found';
+            exit;
+        }
+        $name = str_replace(['"', "\r", "\n"], '', (string) $file['name']);
+        header('Content-Type: application/octet-stream');
+        header('X-Content-Type-Options: nosniff');
+        header('Content-Disposition: attachment; filename="' . $name . '"');
+        header('Cache-Control: private, no-store');
         readfile($file['path']);
         exit;
     }
@@ -515,6 +536,32 @@ final class Kernel
         Http::json($info);
     }
 
+    private function listFiles(string $slug): void
+    {
+        $note = $this->requireRoomAccess($slug);
+        $this->uploads->pruneExpired($slug, (int) ($note['retention_ms'] ?? 0));
+        Http::json(['files' => $this->uploads->listFiles($slug, $this->basePath)]);
+    }
+
+    private function uploadFiles(string $slug): void
+    {
+        Csrf::requireValid();
+        $note = $this->requireRoomAccess($slug);
+        $this->uploads->pruneExpired($slug, (int) ($note['retention_ms'] ?? 0));
+        $paths = $_POST['paths'] ?? [];
+        if (!is_array($paths)) {
+            $paths = [$paths];
+        }
+        try {
+            $info = $this->uploads->saveMany($slug, $_FILES['file'] ?? [], $paths, $this->basePath);
+        } catch (\InvalidArgumentException $e) {
+            Http::error('upload', $e->getMessage());
+        } catch (\Throwable $e) {
+            Http::error('upload', $e->getMessage(), 500);
+        }
+        Http::json($info);
+    }
+
     private function preview(): void
     {
         Csrf::requireValid();
@@ -544,7 +591,9 @@ final class Kernel
             $this->destroyRoom($slug);
             return;
         }
-        $this->history->prune($slug, (int) ($note['retention_ms'] ?? 86400000));
+        $retention = (int) ($note['retention_ms'] ?? 86400000);
+        $this->history->prune($slug, $retention);
+        $this->uploads->pruneExpired($slug, $retention);
     }
 
     private function rateLimitPuts(): void

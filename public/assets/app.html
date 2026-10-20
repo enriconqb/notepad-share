@@ -3,16 +3,18 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover">
-<meta name="theme-color" content="#0a0a0f">
+<meta name="theme-color" content="#0b1020">
 <title>Notepad Share</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
 <script>window.NS_BASE="{{BASE}}";window.NS_SLUG="{{SLUG}}";</script>
 <style>
 /* ============ RESET & THEME ============ */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 :root{
-  --bg-0:#0a0a0f; --bg-1:#12121a; --bg-2:#1a1a24; --bg-3:#22222e;
-  --border:#2a2a3a; --border-2:#3a3a4a;
-  --text-0:#f0f0f5; --text-1:#b0b0c0; --text-2:#707080;
+  --bg-0:#0b1020; --bg-1:#111827; --bg-2:#131c35; --bg-3:#1a1f30;
+  --border:rgba(255,255,255,.08); --border-2:rgba(255,255,255,.12);
+  --text-0:#f8fafc; --text-1:#cbd5e1; --text-2:#64748b;
   --accent:#6366f1; --accent-2:#818cf8; --accent-soft:rgba(99,102,241,.15);
   --success:#10b981; --warn:#f59e0b; --danger:#ef4444;
   --radius:10px; --radius-lg:14px; --radius-xl:20px;
@@ -37,7 +39,7 @@
 }
 html,body{height:100%;overscroll-behavior:none}
 body{
-  font-family:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',Roboto,sans-serif;
+  font-family:Geist,'Segoe UI',sans-serif;
   background:var(--bg-0); color:var(--text-0);
   font-size:15px; line-height:1.5;
   display:flex; flex-direction:column;
@@ -59,7 +61,7 @@ input,textarea,select{font-family:inherit;color:inherit}
   height:var(--header-h); flex-shrink:0;
   display:flex; align-items:center; gap:8px;
   padding:0 12px;
-  background:var(--bg-1); border-bottom:1px solid var(--border);
+  background:#080d1d; border-bottom:1px solid #464554;
   position:relative; z-index:50;
 }
 .brand{
@@ -69,9 +71,9 @@ input,textarea,select{font-family:inherit;color:inherit}
 }
 .brand-mark{
   width:28px; height:28px; border-radius:8px;
-  background:linear-gradient(135deg,var(--accent),#a855f7);
-  display:grid; place-items:center; color:#fff; font-size:14px; font-weight:800;
-  box-shadow:0 4px 12px rgba(99,102,241,.4);
+  background:#1a1f30; border:1px solid #464554; color:#c0c1ff;
+  display:grid; place-items:center; font-size:12px; font-weight:700;
+  font-family:'JetBrains Mono',ui-monospace,monospace;
 }
 .brand-text{display:none}
 .room-chip{
@@ -518,6 +520,23 @@ body.fmt-md #editor{position:absolute;width:1px;height:1px;opacity:0;pointer-eve
 @media (min-width:769px){ .fab-row{display:none} }
 
 /* ============ HINT / KEYBOARD SHORTCUT ============ */
+.file-panel.drawer{
+  position:fixed; top:var(--header-h); right:0; bottom:32px;
+  width:320px; transform:none; z-index:120;
+  display:none; box-shadow:none;
+  background:#161b2b; border-left:1px solid #464554;
+}
+body.files-open .file-panel{display:flex}
+body.files-open .main{margin-right:320px}
+body.files-open .scrim{display:none !important}
+.file-hint{color:var(--text-2);font-size:13px;line-height:1.5;margin-bottom:12px}
+.file-drop{display:grid;place-items:center;min-height:88px;border:1px dashed rgba(99,102,241,.45);border-radius:8px;color:var(--text-1);font-size:13px;cursor:pointer;padding:12px;text-align:center;background:#0b1020}
+.file-drop.over{border-color:var(--accent);background:var(--accent-soft)}
+.file-folder-btn{margin-top:8px;width:100%;padding:8px 12px;border-radius:4px;border:1px solid var(--border-2);background:transparent;color:var(--text-1);cursor:pointer}
+.file-list{list-style:none;margin-top:14px;display:flex;flex-direction:column;gap:8px}
+.file-list a{color:var(--accent-2);font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;word-break:break-all}
+.file-list li{display:flex;justify-content:space-between;gap:8px;align-items:center}
+.file-list button{border:0;background:transparent;color:var(--text-2);cursor:pointer;font-size:12px}
 kbd{
   display:inline-block;
   padding:1px 5px; border-radius:4px;
@@ -565,6 +584,9 @@ kbd{
   </button>
   <button class="icon-btn" id="btn-encrypt-top" title="Enkripsi PQC" aria-label="Enkripsi">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+  </button>
+  <button class="icon-btn" id="btn-files" title="File ruang" aria-label="File ruang">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
   </button>
   <button class="icon-btn" id="btn-menu" title="Menu" aria-label="Menu">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
@@ -680,6 +702,24 @@ kbd{
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
   </button>
 </div>
+
+<aside class="drawer file-panel" id="file-panel" aria-hidden="true">
+  <div class="drawer-head">
+    <h3>File ruang</h3>
+    <button class="icon-btn" id="btn-close-files" aria-label="Tutup file">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+  </div>
+  <div class="drawer-body">
+    <p class="file-hint">Kirim file atau folder, maks 20 MB. Terhapus mengikuti auto-hapus ruang.</p>
+    <label class="file-drop" id="file-drop">
+      Letakkan file atau folder di sini
+      <input type="file" id="file-input" multiple hidden>
+    </label>
+    <button type="button" class="file-folder-btn" id="btn-pick-folder">Pilih folder</button>
+    <ul class="file-list" id="file-list"></ul>
+  </div>
+</aside>
 
 <!-- ============ DRAWER ============ -->
 <div class="scrim" id="scrim"></div>
@@ -840,6 +880,7 @@ kbd{
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <input type="file" id="image-input" accept="image/*" style="display:none">
+<input type="file" id="folder-input" webkitdirectory multiple hidden>
 
 <script type="module">
 import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10.9.1/+esm';
@@ -1239,6 +1280,105 @@ function onEditorPaste(e) {
     consumeImageFiles(files);
   }
 }
+async function uploadAnyFiles(fileList) {
+  const files = [...(fileList || [])];
+  if (!files.length) return;
+  let total = 0;
+  files.forEach((f) => { total += f.size || 0; });
+  if (total > 20 * 1024 * 1024) {
+    toast('Maksimal 20MB per kiriman', 'error');
+    return;
+  }
+  const fd = new FormData();
+  files.forEach((f) => {
+    fd.append('file[]', f);
+    fd.append('paths[]', f.webkitRelativePath || f.name);
+  });
+  const res = await api(`/api/notes/${ROOM}/files`, { method: 'POST', body: fd, csrf: true });
+  (res.files || []).forEach((row) => insertBlock(row.markdown));
+  refreshVisual();
+  await refreshFileList();
+  toast('Berkas terkirim', 'success');
+}
+
+async function refreshFileList() {
+  const box = $('file-list');
+  if (!box) return;
+  const data = await api(`/api/notes/${ROOM}/files`);
+  box.innerHTML = '';
+  (data.files || []).forEach((row) => {
+    const li = document.createElement('li');
+    const a = document.createElement('a');
+    a.href = row.url;
+    a.textContent = row.name;
+    a.title = 'Unduh';
+    const meta = document.createElement('span');
+    meta.textContent = Math.max(1, Math.round((row.bytes || 0) / 1024)) + ' KB';
+    li.append(a, meta);
+    box.appendChild(li);
+  });
+}
+
+function openFiles() {
+  document.body.classList.add('files-open');
+  $('file-panel').setAttribute('aria-hidden', 'false');
+  refreshFileList().catch((err) => toast(err.message, 'error'));
+}
+function closeFiles() {
+  document.body.classList.remove('files-open');
+  $('file-panel').setAttribute('aria-hidden', 'true');
+}
+$('btn-files').addEventListener('click', openFiles);
+$('btn-close-files').addEventListener('click', closeFiles);
+$('btn-pick-folder').addEventListener('click', () => $('folder-input').click());
+$('file-input').addEventListener('change', async (e) => {
+  try { await uploadAnyFiles(e.target.files); } catch (err) { toast(err.message, 'error'); }
+  e.target.value = '';
+});
+$('folder-input').addEventListener('change', async (e) => {
+  try { await uploadAnyFiles(e.target.files); } catch (err) { toast(err.message, 'error'); }
+  e.target.value = '';
+});
+const drop = $('file-drop');
+['dragover', 'dragleave', 'drop'].forEach((ev) => {
+  drop.addEventListener(ev, async (e) => {
+    e.preventDefault();
+    drop.classList.toggle('over', ev === 'dragover');
+    if (ev !== 'drop') return;
+    const items = [...(e.dataTransfer.items || [])];
+    const collected = [];
+    async function walk(entry, prefix) {
+      if (entry.isFile) {
+        const file = await new Promise((res) => entry.file(res));
+        if (file) {
+          Object.defineProperty(file, 'webkitRelativePath', { value: prefix + file.name });
+          collected.push(file);
+        }
+      } else if (entry.isDirectory) {
+        const reader = entry.createReader();
+        let ents = [];
+        for (;;) {
+          const chunk = await new Promise((res) => reader.readEntries(res));
+          if (!chunk.length) break;
+          ents = ents.concat(chunk);
+        }
+        for (const child of ents) await walk(child, prefix + entry.name + '/');
+      }
+    }
+    try {
+      if (items.some((it) => it.webkitGetAsEntry)) {
+        for (const it of items) {
+          const entry = it.webkitGetAsEntry && it.webkitGetAsEntry();
+          if (entry) await walk(entry, '');
+        }
+      }
+      await uploadAnyFiles(collected.length ? collected : e.dataTransfer.files);
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
+});
+
 editor.addEventListener('paste', onEditorPaste);
 editorVisual.addEventListener('paste', onEditorPaste);
 ['dragover', 'drop'].forEach((ev) => {
@@ -1648,14 +1788,17 @@ async function doDecrypt() {
 }
 
 function openDrawer() { $('drawer').classList.add('open'); $('scrim').classList.add('open'); }
-function closeDrawer() { $('drawer').classList.remove('open'); $('scrim').classList.remove('open'); }
+function closeDrawer() {
+  $('drawer').classList.remove('open');
+  if (!document.body.classList.contains('files-open')) $('scrim').classList.remove('open');
+}
 function openModal(id) { $(id).classList.add('open'); }
 function closeModal(id) { $(id).classList.remove('open'); }
 document.querySelectorAll('[data-close-modal]').forEach((b) => b.addEventListener('click', (e) => e.target.closest('.modal').classList.remove('open')));
 document.querySelectorAll('.modal').forEach((m) => m.addEventListener('click', (e) => { if (e.target === m) m.classList.remove('open'); }));
 $('btn-menu').addEventListener('click', openDrawer);
 $('btn-close-drawer').addEventListener('click', closeDrawer);
-$('scrim').addEventListener('click', closeDrawer);
+$('scrim').addEventListener('click', () => { closeDrawer(); closeFiles(); });
 
 function shareLink() {
   const url = location.origin + BASE + '/n/' + ROOM;

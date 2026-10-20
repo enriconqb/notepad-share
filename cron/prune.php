@@ -36,7 +36,9 @@ foreach (glob($data . '/notes/*.json') ?: [] as $file) {
         $expiredRooms++;
         continue;
     }
-    $prunedHistory += $history->prune($slug, (int) ($note['retention_ms'] ?? 86400000));
+    $retention = (int) ($note['retention_ms'] ?? 86400000);
+    $prunedHistory += $history->prune($slug, $retention);
+    $uploads->pruneExpired($slug, $retention);
 }
 
 echo "Pruned {$prunedHistory} history files, expired {$expiredRooms} rooms\n";
