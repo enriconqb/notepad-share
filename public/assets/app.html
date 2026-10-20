@@ -31,7 +31,7 @@
 [data-theme="light"]{
   --bg-0:#ffffff; --bg-1:#f8fafc; --bg-2:#f1f5f9; --bg-3:#e2e8f0;
   --border:#e2e8f0; --border-2:#cbd5e1;
-  --text-0:#0f172a; --text-1:#475569; --text-2:#94a3b8;
+  --text-0:#0f172a; --text-1:#334155; --text-2:#475569;
   --accent-soft:rgba(99,102,241,.1);
   --shadow-sm:0 2px 8px rgba(15,23,42,.06);
   --shadow-md:0 8px 24px rgba(15,23,42,.1);
@@ -61,7 +61,7 @@ input,textarea,select{font-family:inherit;color:inherit}
   height:var(--header-h); flex-shrink:0;
   display:flex; align-items:center; gap:8px;
   padding:0 12px;
-  background:#080d1d; border-bottom:1px solid #464554;
+  background:var(--bg-0); border-bottom:1px solid var(--border);
   position:relative; z-index:50;
 }
 .brand{
@@ -71,7 +71,7 @@ input,textarea,select{font-family:inherit;color:inherit}
 }
 .brand-mark{
   width:28px; height:28px; border-radius:8px;
-  background:#1a1f30; border:1px solid #464554; color:#c0c1ff;
+  background:var(--bg-2); border:1px solid var(--border); color:var(--accent);
   display:grid; place-items:center; font-size:12px; font-weight:700;
   font-family:'JetBrains Mono',ui-monospace,monospace;
 }
@@ -524,19 +524,33 @@ body.fmt-md #editor{position:absolute;width:1px;height:1px;opacity:0;pointer-eve
   position:fixed; top:var(--header-h); right:0; bottom:32px;
   width:320px; transform:none; z-index:120;
   display:none; box-shadow:none;
-  background:#161b2b; border-left:1px solid #464554;
+  background:var(--bg-1); border-left:1px solid var(--border);
 }
 body.files-open .file-panel{display:flex}
 body.files-open .main{margin-right:320px}
 body.files-open .scrim{display:none !important}
 .file-hint{color:var(--text-2);font-size:13px;line-height:1.5;margin-bottom:12px}
-.file-drop{display:grid;place-items:center;min-height:88px;border:1px dashed rgba(99,102,241,.45);border-radius:8px;color:var(--text-1);font-size:13px;cursor:pointer;padding:12px;text-align:center;background:#0b1020}
+.file-drop{display:grid;place-items:center;min-height:88px;border:1px dashed rgba(99,102,241,.45);border-radius:8px;color:var(--text-1);font-size:13px;cursor:pointer;padding:12px;text-align:center;background:var(--bg-0)}
 .file-drop.over{border-color:var(--accent);background:var(--accent-soft)}
 .file-folder-btn{margin-top:8px;width:100%;padding:8px 12px;border-radius:4px;border:1px solid var(--border-2);background:transparent;color:var(--text-1);cursor:pointer}
 .file-list{list-style:none;margin-top:14px;display:flex;flex-direction:column;gap:8px}
 .file-list a{color:var(--accent-2);font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;word-break:break-all}
 .file-list li{display:flex;justify-content:space-between;gap:8px;align-items:center}
 .file-list button{border:0;background:transparent;color:var(--text-2);cursor:pointer;font-size:12px}
+.file-ico{width:28px;height:28px;border-radius:6px;display:grid;place-items:center;flex-shrink:0;font-size:9px;font-weight:700;letter-spacing:.02em;font-family:'JetBrains Mono',ui-monospace,monospace;background:var(--bg-2);border:1px solid var(--border);color:var(--accent)}
+.file-del{color:#ef4444;width:28px;height:28px;display:grid;place-items:center;border-radius:6px}
+.file-del:hover{background:rgba(239,68,68,.12)}
+.file-del svg{width:16px;height:16px;stroke:#ef4444;fill:none}
+.file-ico.image{color:#7bd0ff}.file-ico.pdf{color:#ffb4ab}.file-ico.archive{color:#fbbf24}.file-ico.code{color:#86efac}.file-ico.video{color:#c4b5fd}.file-ico.audio{color:#f9a8d4}.file-ico.folder{color:#818cf8}
+[data-theme="light"] .file-ico.image{color:#0369a1}
+[data-theme="light"] .file-ico.pdf{color:#b91c1c}
+[data-theme="light"] .file-ico.archive{color:#b45309}
+[data-theme="light"] .file-ico.code{color:#047857}
+[data-theme="light"] .file-ico.video{color:#6d28d9}
+[data-theme="light"] .file-ico.audio{color:#be185d}
+[data-theme="light"] .file-ico.folder{color:#4338ca}
+.file-main{display:flex;align-items:center;gap:8px;min-width:0;flex:1}
+.file-main a{min-width:0}
 kbd{
   display:inline-block;
   padding:1px 5px; border-radius:4px;
@@ -1064,7 +1078,7 @@ function applyTheme(t) {
   document.documentElement.dataset.theme = t;
   state.theme = t;
   localStorage.setItem('ns_theme', t);
-  document.querySelector('meta[name="theme-color"]').content = t === 'dark' ? '#0a0a0f' : '#ffffff';
+  document.querySelector('meta[name="theme-color"]').content = t === 'dark' ? '#0b1020' : '#ffffff';
   mermaid.initialize({ startOnLoad: false, theme: t === 'dark' ? 'dark' : 'default', securityLevel: 'strict' });
 }
 applyTheme(state.theme);
@@ -1301,6 +1315,24 @@ async function uploadAnyFiles(fileList) {
   toast('Berkas terkirim', 'success');
 }
 
+function fileIconKind(row) {
+  const name = String(row.name || '');
+  if (name.includes('/')) return { cls: 'folder', label: 'DIR' };
+  const ext = String(row.ext || '').toLowerCase();
+  const groups = {
+    image: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico'],
+    pdf: ['pdf'],
+    archive: ['zip', 'rar', '7z', 'tar', 'gz'],
+    code: ['json', 'md', 'txt', 'js', 'php', 'css', 'html', 'xml', 'yml', 'yaml', 'ts', 'py', 'sql'],
+    video: ['mp4', 'webm', 'mov', 'mkv', 'avi'],
+    audio: ['mp3', 'wav', 'ogg', 'm4a', 'flac'],
+  };
+  for (const [cls, list] of Object.entries(groups)) {
+    if (list.includes(ext)) return { cls, label: (ext || 'file').slice(0, 4).toUpperCase() };
+  }
+  return { cls: 'file', label: (ext || 'file').slice(0, 4).toUpperCase() };
+}
+
 async function refreshFileList() {
   const box = $('file-list');
   if (!box) return;
@@ -1308,13 +1340,33 @@ async function refreshFileList() {
   box.innerHTML = '';
   (data.files || []).forEach((row) => {
     const li = document.createElement('li');
+    const main = document.createElement('div');
+    main.className = 'file-main';
+    const ico = document.createElement('span');
+    const kind = fileIconKind(row);
+    ico.className = 'file-ico ' + kind.cls;
+    ico.textContent = kind.label;
     const a = document.createElement('a');
     a.href = row.url;
     a.textContent = row.name;
     a.title = 'Unduh';
-    const meta = document.createElement('span');
-    meta.textContent = Math.max(1, Math.round((row.bytes || 0) / 1024)) + ' KB';
-    li.append(a, meta);
+    main.append(ico, a);
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'file-del';
+    del.title = 'Hapus berkas';
+    del.setAttribute('aria-label', 'Hapus berkas');
+    del.innerHTML = '<svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
+    del.addEventListener('click', async () => {
+      if (!confirm('Hapus berkas ini?')) return;
+      try {
+        await api(`/api/notes/${ROOM}/files/${row.id}`, { method: 'DELETE', json: {} });
+        await refreshFileList();
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    });
+    li.append(main, del);
     box.appendChild(li);
   });
 }

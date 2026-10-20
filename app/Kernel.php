@@ -57,6 +57,7 @@ final class Kernel
         $r->add('POST', '/api/notes/(?P<slug>[a-z0-9-]+)/images', fn (string $slug) => $this->upload($slug));
         $r->add('GET', '/api/notes/(?P<slug>[a-z0-9-]+)/files', fn (string $slug) => $this->listFiles($slug));
         $r->add('POST', '/api/notes/(?P<slug>[a-z0-9-]+)/files', fn (string $slug) => $this->uploadFiles($slug));
+        $r->add('DELETE', '/api/notes/(?P<slug>[a-z0-9-]+)/files/(?P<id>[a-f0-9]+)', fn (string $slug, string $id) => $this->deleteFile($slug, $id));
         $r->add('POST', '/api/preview', fn () => $this->preview());
     }
 
@@ -560,6 +561,16 @@ final class Kernel
             Http::error('upload', $e->getMessage(), 500);
         }
         Http::json($info);
+    }
+
+    private function deleteFile(string $slug, string $id): void
+    {
+        Csrf::requireValid();
+        $this->requireRoomAccess($slug);
+        if (!$this->uploads->deleteOne($slug, $id)) {
+            Http::error('upload', 'Berkas tidak ditemukan', 404);
+        }
+        Http::json(['ok' => true]);
     }
 
     private function preview(): void

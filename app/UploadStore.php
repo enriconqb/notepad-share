@@ -113,9 +113,12 @@ final class UploadStore
                 continue;
             }
             $id = (string) $row['id'];
+            $name = (string) ($row['rel'] ?? $row['original'] ?? $id);
+            $ext = strtolower(pathinfo(str_replace('\\', '/', $name), PATHINFO_EXTENSION));
             $out[] = [
                 'id' => $id,
-                'name' => (string) ($row['rel'] ?? $row['original'] ?? $id),
+                'name' => $name,
+                'ext' => $ext,
                 'bytes' => (int) ($row['bytes'] ?? 0),
                 'uploaded_at' => (string) ($row['uploaded_at'] ?? ''),
                 'kind' => (string) ($row['kind'] ?? 'file'),
@@ -178,6 +181,40 @@ final class UploadStore
             return $idx;
         });
         return $removed;
+    }
+
+    public function deleteOne(string $slug, string $id): bool
+    {
+        if (!preg_match('/^[a-f0-9]{16}$/', $id)) {
+            return false;
+        }
+        $dir = $this->root . '/uploads/' . $slug;
+        $indexPath = $dir . '/index.json';
+        if (!is_file($indexPath)) {
+            return false;
+        }
+        $found = false;
+        JsonFile::mutate($indexPath, function (array $idx) use ($id, &$found) {
+            $keep = [];
+            foreach ($idx['files'] ?? [] as $row) {
+                if (is_array($row) && ($row['id'] ?? '') === $id) {
+                    $found = true;
+                    continue;
+                }
+                $keep[] = $row;
+            }
+            $idx['files'] = $keep;
+            return $idx;
+        });
+        if (!$found) {
+            return false;
+        }
+        foreach (glob($dir . '/' . $id . '.*') ?: [] as $path) {
+            if (is_file($path)) {
+                unlink($path);
+            }
+        }
+        return true;
     }
 
     public function deleteSlug(string $slug): void
